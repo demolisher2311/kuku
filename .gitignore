@@ -1,0 +1,13 @@
+.env
+.cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Kuku's screenplays and outputs that quote them are confidential: never push them.
+data/
+outputs/
+quality/*.xlsx
+*-scripts*/
+quality/*.pdf
