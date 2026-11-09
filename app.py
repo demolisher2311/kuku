@@ -21,8 +21,9 @@ from core.pipeline import run
 load_dotenv()
 st.set_page_config(page_title="Promo Finder", page_icon="🎬", layout="wide")
 st.title("🎬 Promo Finder")
-st.caption("Reads a microdrama screenplay and finds the best 20-60s promos: hook in the first 3s, "
-           "ends on a cliffhanger, makes sense to a cold viewer.")
+st.caption("Reads a microdrama screenplay and finds the best 35-60s promos: hook in the first 3s, "
+           "ends on a cliffhanger, makes sense to a cold viewer. "
+           "Code: https://github.com/demolisher2311/kuku")
 
 # ----------------------------------------------------------------- sidebar: model
 with st.sidebar:
@@ -36,12 +37,16 @@ with st.sidebar:
         model = st.text_input("Model", os.getenv("LLM_MODEL") if provider == default_p and os.getenv("LLM_MODEL")
                               else DEFAULT_MODELS.get(provider, ""))
         api_key = st.text_input("API key", type="password",
-                                help="Left empty -> uses LLM_API_KEY from .env. Never stored.")
+                                help="Your own key, used only for this run and never stored. "
+                                     "Free Gemini key: https://aistudio.google.com/apikey. "
+                                     "Running locally, an empty field uses LLM_API_KEY from .env.")
         base_url = st.text_input("Base URL (optional)", help="Any OpenAI-compatible endpoint")
     judge_style = st.selectbox("Judge", ["pairwise", "strict", "classic"],
                                help="pairwise: compares clips two at a time, then a tournament between episodes. "
                                     "strict: 1-10 scores per clip. classic: one batched call per episode (cheapest).")
     st.header("Run")
+    st.caption("Free Gemini keys allow ~500 calls a day; a full 50-episode show needs ~490. "
+               "Try a few episodes first, e.g. 1-3.")
     ep_spec = st.text_input("Episodes", "", help="e.g. 1-5 or 1,3,7. Empty = all")
     per_ep = st.slider("Candidates per episode", 2, 6, 4)
     workers = st.slider("Parallel calls", 1, 6, 2, help="Keep low on free tiers (rate limits)")
@@ -61,8 +66,8 @@ def show_results(data: dict, key: str):
     df = pd.DataFrame([{
         "rank": p["rank"], "id": p["id"], "title": p["title"], "segments": p.get("segments_label", ""),
         "sec": p["total_seconds"], "score": p["final_score"],
-        "hook": p["scores"].get("hook"), "cliff": p["scores"].get("cliffhanger"),
-        "standalone": p["scores"].get("standalone"), "spoiler": p["spoiler_level"],
+        "judge": ", ".join(f"{k} {v:g}" for k, v in p["scores"].items()),
+        "passes checks": p.get("approved"), "spoiler": p["spoiler_level"],
         "hook text": p["hook"], "cliffhanger text": p["cliffhanger"],
     } for p in rows])
     st.subheader(f"{len(rows)} promos, ranked")
@@ -78,8 +83,9 @@ def show_results(data: dict, key: str):
             c1, c2 = st.columns(2)
             c1.markdown(f"**Hook (first 3s):** {p['hook']}\n\n**Cliffhanger:** {p['cliffhanger']}\n\n"
                         f"**Why it works:** {p['why']}")
-            c2.markdown(f"**Why this rank:** {p['rank_reason']}\n\n**Cold-viewer judge:** {p['judge_verdict']}"
-                        + (f"\n\n**Might confuse:** {p['judge_confusing']}" if p.get("judge_confusing") else ""))
+            c2.markdown(f"**Why this rank:** {p['rank_reason']}"
+                        + (f"\n\n**Cold-viewer judge:** {p['judge_verdict']}" if p.get("judge_verdict") else "")
+                        +(f"\n\n**Might confuse:** {p['judge_confusing']}" if p.get("judge_confusing") else ""))
             st.code(p.get("script", ""), language=None)
     if rejected:
         with st.expander(f"{len(rejected)} candidates rejected by the validator"):
@@ -90,7 +96,10 @@ def show_results(data: dict, key: str):
 with tab_run:
     st.write("Upload the episode `.txt` screenplays (select all of them) or one `.zip` of the folder.")
     files = st.file_uploader("Screenplays", type=["txt", "zip"], accept_multiple_files=True)
-    go = st.button("Find promos", type="primary", disabled=not files)
+    needs_key = provider not in ("heuristic", "ollama") and not (api_key or os.getenv("LLM_API_KEY"))
+    if needs_key:
+        st.info("Paste your API key in the sidebar, or pick the 'heuristic' provider (no AI, no key).")
+    go = st.button("Find promos", type="primary", disabled=not files or needs_key)
     if go and files:
         work = Path(tempfile.mkdtemp(prefix="promo_"))
         src = work / "scripts"
@@ -112,6 +121,7 @@ with tab_run:
         if provider != "heuristic":
             llm = LLM.from_env("LLM", provider=provider, model=model or None, api_key=api_key or None,
                                base_url=base_url or None)
+            llm.cache_dir = str(work / "cache")   # per-run cache: nothing is shared between visitors
         logs: list[str] = []
         with st.status("Running...", expanded=True) as status:
             box = st.empty()

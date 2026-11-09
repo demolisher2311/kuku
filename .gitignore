@@ -11,3 +11,4 @@ outputs/
 quality/*.xlsx
 *-scripts*/
 quality/*.pdf
+.claude/
